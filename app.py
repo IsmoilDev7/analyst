@@ -2,125 +2,126 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-st.set_page_config(page_title="CRM Leads Analytics", layout="wide")
-st.title("📊 CRM Leads – Full Analytics Dashboard")
+# =============================
+# PAGE CONFIG
+# =============================
+st.set_page_config(page_title="Excel Analytics Dashboard", layout="wide")
+st.title("📊 Excel Data Analytics Dashboard")
+
+st.info("⬅️ Chap tomondan Excel fayl yuklang (.xlsx)")
 
 # =============================
-# DATA LOAD
+# FILE UPLOADER
 # =============================
-def load_from_github():
-    try:
-        url = "https://raw.githubusercontent.com/USERNAME/REPO/main/data/leads.csv"
-        df = pd.read_csv(url)
-        return df
-    except:
-        return None
-
 uploaded_file = st.sidebar.file_uploader(
-    "📂 Upload CSV file",
-    type=["csv"]
+    "📂 Excel fayl yuklang",
+    type=["xlsx"]
 )
 
-df = None
-
-if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-elif load_from_github() is not None:
-    df = load_from_github()
-else:
-    st.error("❌ No data loaded. Upload CSV or fix GitHub raw link.")
+if uploaded_file is None:
+    st.warning("Excel yuklanmagan. Analiz boshlanishi uchun fayl yuklang.")
     st.stop()
 
 # =============================
-# DATE PARSE
+# LOAD EXCEL
 # =============================
-df["Date of creation"] = pd.to_datetime(df["Date of creation"], dayfirst=True, errors="coerce")
-df["Date modified"] = pd.to_datetime(df["Date modified"], dayfirst=True, errors="coerce")
+df = pd.read_excel(uploaded_file)
 
-# =============================
-# SIDEBAR FILTERS
-# =============================
-st.sidebar.header("🔍 Filters")
-
-stage = st.sidebar.multiselect("Stage", df["Stage"].unique(), df["Stage"].unique())
-source = st.sidebar.multiselect("Source", df["Source"].unique(), df["Source"].unique())
-manager = st.sidebar.multiselect("Responsible", df["Responsible"].unique(), df["Responsible"].unique())
-
-date_range = st.sidebar.date_input(
-    "Date of creation",
-    [df["Date of creation"].min(), df["Date of creation"].max()]
-)
-
-filtered = df[
-    (df["Stage"].isin(stage)) &
-    (df["Source"].isin(source)) &
-    (df["Responsible"].isin(manager)) &
-    (df["Date of creation"].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])))
-]
+st.success("✅ Excel muvaffaqiyatli yuklandi")
 
 # =============================
-# KPI
+# DATE COLUMNS AUTO PARSE
+# =============================
+for col in df.columns:
+    if "date" in col.lower():
+        df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+
+# =============================
+# SIDEBAR FILTERS (AUTO)
+# =============================
+st.sidebar.header("🔎 Filterlar")
+
+filtered_df = df.copy()
+
+for col in df.select_dtypes(include=["object"]).columns:
+    values = st.sidebar.multiselect(
+        f"{col}",
+        df[col].dropna().unique(),
+        df[col].dropna().unique()
+    )
+    filtered_df = filtered_df[filtered_df[col].isin(values)]
+
+# =============================
+# KPI METRICS
 # =============================
 st.subheader("📌 KPI")
 
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Leads", len(filtered))
-c2.metric("Companies", filtered["Company name"].nunique())
-c3.metric("Managers", filtered["Responsible"].nunique())
-c4.metric("Sources", filtered["Source"].nunique())
+c1, c2, c3 = st.columns(3)
+c1.metric("Rows", len(filtered_df))
+c2.metric("Columns", filtered_df.shape[1])
+c3.metric("Unique Values", filtered_df.nunique().sum())
 
 # =============================
-# STAGE PIE
+# CATEGORICAL ANALYSIS
 # =============================
-st.subheader("📈 Stage Distribution")
-st.plotly_chart(
-    px.pie(filtered, names="Stage"),
-    use_container_width=True
+st.subheader("📊 Kategoriyalar bo‘yicha analiz")
+
+cat_cols = filtered_df.select_dtypes(include=["object"]).columns
+
+for col in cat_cols:
+    fig = px.bar(
+        filtered_df[col].value_counts().reset_index(),
+        x="index",
+        y=col,
+        title=f"{col} bo‘yicha taqsimot",
+        text_auto=True
+    )
+    fig.update_layout(xaxis_title=col, yaxis_title="Count")
+    st.plotly_chart(fig, use_container_width=True)
+
+# =============================
+# NUMERIC ANALYSIS
+# =============================
+st.subheader("📈 Sonli ustunlar analizi")
+
+num_cols = filtered_df.select_dtypes(include=["int64", "float64"]).columns
+
+for col in num_cols:
+    fig = px.histogram(
+        filtered_df,
+        x=col,
+        nbins=30,
+        title=f"{col} distribution"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# =============================
+# TIME ANALYSIS
+# =============================
+date_cols = filtered_df.select_dtypes(include=["datetime64[ns]"]).columns
+
+for col in date_cols:
+    time_df = filtered_df.resample("D", on=col).size().reset_index(name="Count")
+    fig = px.line(
+        time_df,
+        x=col,
+        y="Count",
+        title=f"{col} bo‘yicha vaqt analizi"
+    )
+    st.plotly_chart(fig, use_container_width=True)
+
+# =============================
+# DATA TABLE
+# =============================
+st.subheader("📄 Filterlangan ma’lumotlar")
+st.dataframe(filtered_df, use_container_width=True)
+
+# =============================
+# DOWNLOAD
+# =============================
+st.download_button(
+    "⬇️ Filterlangan datani yuklab olish (CSV)",
+    filtered_df.to_csv(index=False).encode("utf-8"),
+    file_name="filtered_data.csv",
+    mime="text/csv"
 )
-
-# =============================
-# BEST SOURCE
-# =============================
-st.subheader("🔥 Best Source")
-src = filtered.groupby("Source").size().reset_index(name="Leads")
-st.plotly_chart(
-    px.bar(src, x="Source", y="Leads", text_auto=True),
-    use_container_width=True
-)
-
-# =============================
-# MANAGER PERFORMANCE
-# =============================
-st.subheader("🏆 Manager Performance Score")
-mgr = filtered.groupby(["Responsible", "Stage"]).size().reset_index(name="Count")
-st.plotly_chart(
-    px.bar(mgr, x="Responsible", y="Count", color="Stage", barmode="stack"),
-    use_container_width=True
-)
-
-# =============================
-# TIME SERIES
-# =============================
-st.subheader("⏳ Leads Over Time")
-time_df = filtered.resample("D", on="Date of creation").size().reset_index(name="Leads")
-st.plotly_chart(
-    px.line(time_df, x="Date of creation", y="Leads"),
-    use_container_width=True
-)
-
-# =============================
-# TOP COMPANIES
-# =============================
-st.subheader("🏢 Top Companies")
-top = filtered["Company name"].value_counts().head(10).reset_index()
-top.columns = ["Company", "Leads"]
-st.plotly_chart(
-    px.bar(top, x="Company", y="Leads"),
-    use_container_width=True
-)
-
-# =============================
-# TABLE
-# =============================
-st.subheader("📄 Data Table")
-st.dataframe(filtered, use_container_width=True)
