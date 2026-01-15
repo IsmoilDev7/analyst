@@ -2,9 +2,6 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# =============================
-# PAGE CONFIG
-# =============================
 st.set_page_config(page_title="CRM Analytics Dashboard", layout="wide")
 st.title("📊 CRM Leads Analytics Dashboard")
 
@@ -14,20 +11,31 @@ st.info("⬅️ Chap tomondan Excel fayl yuklang (.xlsx)")
 # FILE UPLOADER
 # =============================
 uploaded_file = st.sidebar.file_uploader("📂 Excel fayl yuklang", type=["xlsx"])
-
 if uploaded_file is None:
     st.stop()
 
 # =============================
 # LOAD EXCEL
 # =============================
-# Avval header bilan o‘qiymiz
 df = pd.read_excel(uploaded_file, header=0)
 
-# Agar barcha ustunlar "Unnamed" bo‘lsa, qo‘lda nom beramiz
-if all("Unnamed" in str(c) for c in df.columns):
-    # Fayl senga ko‘ra faqat 6 ustunli deb faraz qilaymiz
-    df.columns = ["Stage", "Source", "Responsible", "Date of creation", "Date modified", "Company name"]
+# =============================
+# AUTOMATIC COLUMN RENAMING
+# =============================
+# Asosiy ustunlar
+required_cols = ["Stage", "Source", "Responsible", "Date of creation", "Date modified", "Company name"]
+
+# Agar columnlar “Unnamed” bo‘lsa yoki soni farq qilsa:
+if len(df.columns) < len(required_cols):
+    # yetmaydigan joyga bo‘sh ustun qo‘shamiz
+    for i in range(len(required_cols) - len(df.columns)):
+        df[f"extra_{i}"] = ""
+elif len(df.columns) > len(required_cols):
+    # ortiqcha ustunlarni olib tashlaymiz
+    df = df.iloc[:, :len(required_cols)]
+
+# Endi nom beramiz
+df.columns = required_cols
 
 st.success("✅ Excel muvaffaqiyatli yuklandi")
 st.write("**Ustunlar:**", df.columns.tolist())
@@ -36,35 +44,25 @@ st.write("**Ustunlar:**", df.columns.tolist())
 # DATE PARSE
 # =============================
 for col in ["Date of creation", "Date modified"]:
-    if col in df.columns:
-        df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+    df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
 
 # =============================
 # SIDEBAR FILTERS
 # =============================
 st.sidebar.header("🔎 Filters")
-
-stage_col = "Stage" if "Stage" in df.columns else df.columns[0]
-source_col = "Source" if "Source" in df.columns else df.columns[1]
-manager_col = "Responsible" if "Responsible" in df.columns else df.columns[2]
-created_col = "Date of creation" if "Date of creation" in df.columns else df.columns[3]
-modified_col = "Date modified" if "Date modified" in df.columns else df.columns[4]
-company_col = "Company name" if "Company name" in df.columns else df.columns[5]
-
-# Filters
-stage_f = st.sidebar.multiselect("Stage", df[stage_col].unique(), df[stage_col].unique())
-source_f = st.sidebar.multiselect("Source", df[source_col].unique(), df[source_col].unique())
-manager_f = st.sidebar.multiselect("Responsible", df[manager_col].unique(), df[manager_col].unique())
+stage_f = st.sidebar.multiselect("Stage", df["Stage"].unique(), df["Stage"].unique())
+source_f = st.sidebar.multiselect("Source", df["Source"].unique(), df["Source"].unique())
+manager_f = st.sidebar.multiselect("Responsible", df["Responsible"].unique(), df["Responsible"].unique())
 date_range = st.sidebar.date_input(
     "Date of creation",
-    [df[created_col].min(), df[created_col].max()]
+    [df["Date of creation"].min(), df["Date of creation"].max()]
 )
 
 filtered = df[
-    (df[stage_col].isin(stage_f)) &
-    (df[source_col].isin(source_f)) &
-    (df[manager_col].isin(manager_f)) &
-    (df[created_col].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])))
+    (df["Stage"].isin(stage_f)) &
+    (df["Source"].isin(source_f)) &
+    (df["Responsible"].isin(manager_f)) &
+    (df["Date of creation"].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])))
 ]
 
 # =============================
@@ -73,15 +71,15 @@ filtered = df[
 st.subheader("📌 KPI Overview")
 c1, c2, c3, c4 = st.columns(4)
 c1.metric("Total Leads", len(filtered))
-c2.metric("Companies", filtered[company_col].nunique())
-c3.metric("Managers", filtered[manager_col].nunique())
-c4.metric("Sources", filtered[source_col].nunique())
+c2.metric("Companies", filtered["Company name"].nunique())
+c3.metric("Managers", filtered["Responsible"].nunique())
+c4.metric("Sources", filtered["Source"].nunique())
 
 # =============================
 # STAGE FUNNEL
 # =============================
 st.subheader("📈 Lead Funnel (Stage)")
-stage_count = filtered[stage_col].value_counts().reset_index()
+stage_count = filtered["Stage"].value_counts().reset_index()
 stage_count.columns = ["Stage", "Leads"]
 fig_stage = px.bar(stage_count, x="Stage", y="Leads", text="Leads", title="Leads by Stage")
 st.plotly_chart(fig_stage, use_container_width=True)
@@ -90,31 +88,31 @@ st.plotly_chart(fig_stage, use_container_width=True)
 # BEST SOURCE
 # =============================
 st.subheader("🔥 Best Lead Sources")
-src = filtered.groupby(source_col).size().reset_index(name="Leads")
-fig_src = px.bar(src.sort_values("Leads", ascending=False), x=source_col, y="Leads", text="Leads", title="Leads by Source")
+src = filtered.groupby("Source").size().reset_index(name="Leads")
+fig_src = px.bar(src.sort_values("Leads", ascending=False), x="Source", y="Leads", text="Leads", title="Leads by Source")
 st.plotly_chart(fig_src, use_container_width=True)
 
 # =============================
 # MANAGER PERFORMANCE
 # =============================
 st.subheader("🏆 Manager Performance")
-mgr = filtered.groupby([manager_col, stage_col]).size().reset_index(name="Count")
-fig_mgr = px.bar(mgr, x=manager_col, y="Count", color=stage_col, barmode="stack", title="Manager Performance by Stage")
+mgr = filtered.groupby(["Responsible", "Stage"]).size().reset_index(name="Count")
+fig_mgr = px.bar(mgr, x="Responsible", y="Count", color="Stage", barmode="stack", title="Manager Performance by Stage")
 st.plotly_chart(fig_mgr, use_container_width=True)
 
 # =============================
 # LEADS OVER TIME
 # =============================
 st.subheader("⏳ Leads Over Time")
-time_df = filtered.resample("D", on=created_col).size().reset_index(name="Leads")
-fig_time = px.line(time_df, x=created_col, y="Leads", title="Daily Lead Creation Trend")
+time_df = filtered.resample("D", on="Date of creation").size().reset_index(name="Leads")
+fig_time = px.line(time_df, x="Date of creation", y="Leads", title="Daily Lead Creation Trend")
 st.plotly_chart(fig_time, use_container_width=True)
 
 # =============================
 # TOP COMPANIES
 # =============================
 st.subheader("🏢 Top Companies")
-top_comp = filtered[company_col].value_counts().head(15).reset_index()
+top_comp = filtered["Company name"].value_counts().head(15).reset_index()
 top_comp.columns = ["Company", "Leads"]
 fig_comp = px.bar(top_comp, x="Company", y="Leads", text="Leads", title="Top Companies by Leads")
 st.plotly_chart(fig_comp, use_container_width=True)
@@ -123,7 +121,7 @@ st.plotly_chart(fig_comp, use_container_width=True)
 # PROCESSING TIME
 # =============================
 st.subheader("⚡ Lead Processing Time")
-filtered["Processing Days"] = (filtered[modified_col] - filtered[created_col]).dt.days
+filtered["Processing Days"] = (filtered["Date modified"] - filtered["Date of creation"]).dt.days
 fig_speed = px.histogram(filtered, x="Processing Days", nbins=30, title="Lead Processing Time (Days)")
 st.plotly_chart(fig_speed, use_container_width=True)
 
