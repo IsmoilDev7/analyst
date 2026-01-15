@@ -2,30 +2,40 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# =============================
-# PAGE CONFIG
-# =============================
-st.set_page_config(
-    page_title="CRM Leads Full Analytics",
-    layout="wide"
-)
-
+st.set_page_config(page_title="CRM Leads Analytics", layout="wide")
 st.title("📊 CRM Leads – Full Analytics Dashboard")
 
 # =============================
-# LOAD DATA FROM GITHUB
+# DATA LOAD
 # =============================
-@st.cache_data
-def load_data():
-    url = "https://raw.githubusercontent.com/USERNAME/REPO/main/data/leads.csv"
-    df = pd.read_csv(url)
+def load_from_github():
+    try:
+        url = "https://raw.githubusercontent.com/USERNAME/REPO/main/data/leads.csv"
+        df = pd.read_csv(url)
+        return df
+    except:
+        return None
 
-    df["Date of creation"] = pd.to_datetime(df["Date of creation"], dayfirst=True)
-    df["Date modified"] = pd.to_datetime(df["Date modified"], dayfirst=True)
+uploaded_file = st.sidebar.file_uploader(
+    "📂 Upload CSV file",
+    type=["csv"]
+)
 
-    return df
+df = None
 
-df = load_data()
+if uploaded_file is not None:
+    df = pd.read_csv(uploaded_file)
+elif load_from_github() is not None:
+    df = load_from_github()
+else:
+    st.error("❌ No data loaded. Upload CSV or fix GitHub raw link.")
+    st.stop()
+
+# =============================
+# DATE PARSE
+# =============================
+df["Date of creation"] = pd.to_datetime(df["Date of creation"], dayfirst=True, errors="coerce")
+df["Date modified"] = pd.to_datetime(df["Date modified"], dayfirst=True, errors="coerce")
 
 # =============================
 # SIDEBAR FILTERS
@@ -41,9 +51,6 @@ date_range = st.sidebar.date_input(
     [df["Date of creation"].min(), df["Date of creation"].max()]
 )
 
-# =============================
-# APPLY FILTERS
-# =============================
 filtered = df[
     (df["Stage"].isin(stage)) &
     (df["Source"].isin(source)) &
@@ -52,104 +59,68 @@ filtered = df[
 ]
 
 # =============================
-# KPI METRICS
+# KPI
 # =============================
-st.subheader("📌 Key Metrics")
+st.subheader("📌 KPI")
 
-col1, col2, col3, col4 = st.columns(4)
-
-col1.metric("Total Leads", len(filtered))
-col2.metric("Unique Companies", filtered["Company name"].nunique())
-col3.metric("Managers", filtered["Responsible"].nunique())
-col4.metric("Sources", filtered["Source"].nunique())
-
-# =============================
-# STAGE DISTRIBUTION
-# =============================
-st.subheader("📈 Lead Stage Distribution")
-
-fig_stage = px.pie(
-    filtered,
-    names="Stage",
-    title="Leads by Stage"
-)
-st.plotly_chart(fig_stage, use_container_width=True)
+c1, c2, c3, c4 = st.columns(4)
+c1.metric("Total Leads", len(filtered))
+c2.metric("Companies", filtered["Company name"].nunique())
+c3.metric("Managers", filtered["Responsible"].nunique())
+c4.metric("Sources", filtered["Source"].nunique())
 
 # =============================
-# SOURCE ANALYSIS (🔥 BEST SOURCE)
+# STAGE PIE
 # =============================
-st.subheader("🔥 Best Lead Source")
-
-source_count = filtered.groupby("Source").size().reset_index(name="Leads")
-
-fig_source = px.bar(
-    source_count,
-    x="Source",
-    y="Leads",
-    title="Leads by Source",
-    text_auto=True
-)
-st.plotly_chart(fig_source, use_container_width=True)
-
-# =============================
-# MANAGER PERFORMANCE SCORE
-# =============================
-st.subheader("🏆 Manager Performance")
-
-manager_score = (
-    filtered.groupby(["Responsible", "Stage"])
-    .size()
-    .reset_index(name="Count")
+st.subheader("📈 Stage Distribution")
+st.plotly_chart(
+    px.pie(filtered, names="Stage"),
+    use_container_width=True
 )
 
-fig_manager = px.bar(
-    manager_score,
-    x="Responsible",
-    y="Count",
-    color="Stage",
-    title="Manager Performance by Stage",
-    barmode="stack"
+# =============================
+# BEST SOURCE
+# =============================
+st.subheader("🔥 Best Source")
+src = filtered.groupby("Source").size().reset_index(name="Leads")
+st.plotly_chart(
+    px.bar(src, x="Source", y="Leads", text_auto=True),
+    use_container_width=True
 )
-st.plotly_chart(fig_manager, use_container_width=True)
 
 # =============================
-# TIME ANALYSIS
+# MANAGER PERFORMANCE
+# =============================
+st.subheader("🏆 Manager Performance Score")
+mgr = filtered.groupby(["Responsible", "Stage"]).size().reset_index(name="Count")
+st.plotly_chart(
+    px.bar(mgr, x="Responsible", y="Count", color="Stage", barmode="stack"),
+    use_container_width=True
+)
+
+# =============================
+# TIME SERIES
 # =============================
 st.subheader("⏳ Leads Over Time")
-
 time_df = filtered.resample("D", on="Date of creation").size().reset_index(name="Leads")
-
-fig_time = px.line(
-    time_df,
-    x="Date of creation",
-    y="Leads",
-    title="Leads Created Over Time"
+st.plotly_chart(
+    px.line(time_df, x="Date of creation", y="Leads"),
+    use_container_width=True
 )
-st.plotly_chart(fig_time, use_container_width=True)
 
 # =============================
 # TOP COMPANIES
 # =============================
 st.subheader("🏢 Top Companies")
-
-top_companies = (
-    filtered["Company name"]
-    .value_counts()
-    .head(10)
-    .reset_index()
+top = filtered["Company name"].value_counts().head(10).reset_index()
+top.columns = ["Company", "Leads"]
+st.plotly_chart(
+    px.bar(top, x="Company", y="Leads"),
+    use_container_width=True
 )
-top_companies.columns = ["Company", "Leads"]
-
-fig_comp = px.bar(
-    top_companies,
-    x="Company",
-    y="Leads",
-    title="Top 10 Companies"
-)
-st.plotly_chart(fig_comp, use_container_width=True)
 
 # =============================
-# RAW DATA
+# TABLE
 # =============================
-st.subheader("📄 Filtered Data Table")
+st.subheader("📄 Data Table")
 st.dataframe(filtered, use_container_width=True)
