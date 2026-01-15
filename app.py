@@ -1,161 +1,140 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import io
 
-st.set_page_config(page_title="CRM Dashboard / CRM Boshqaruv Paneli", layout="wide")
-st.title("📊 CRM Leads Analytics Dashboard / CRM Yetakchilar Tahlili")
-st.info("⬅️ Chap tomondan Excel fayl yuklang (.xlsx)")
+# -----------------------------
+# PAGE CONFIG
+# -----------------------------
+st.set_page_config(page_title="📊 CRM Campaign Dashboard", layout="wide")
+st.title("📊 CRM Campaign Dashboard")
+st.markdown("""
+Upload your Excel file to visualize **manager-wise campaign interactions, stages, and company contacts**.
+The dashboard includes multiple charts for interactive analysis.
+""")
 
-# =============================
-# FILE UPLOADER
-# =============================
-uploaded_file = st.sidebar.file_uploader("📂 Excel fayl yuklang / Excel fayl yuklash", type=["xlsx"])
+# -----------------------------
+# FILE UPLOAD
+# -----------------------------
+uploaded_file = st.file_uploader("📂 Upload Excel (.xlsx/.xls)", type=["xlsx", "xls"])
 if uploaded_file is None:
     st.stop()
 
-# =============================
-# LOAD EXCEL
-# =============================
-df = pd.read_excel(uploaded_file, header=0)
+df = pd.read_excel(uploaded_file, engine="openpyxl")
+st.write("Columns detected:", df.columns.tolist())
+st.dataframe(df.head(5))
 
-# =============================
-# AUTOMATIC COLUMN RENAMING
-# =============================
-required_cols = ["Stage", "Source", "Responsible", "Date of creation", "Date modified", "Company name"]
-if len(df.columns) < len(required_cols):
-    for i in range(len(required_cols) - len(df.columns)):
-        df[f"extra_{i}"] = ""
-elif len(df.columns) > len(required_cols):
-    df = df.iloc[:, :len(required_cols)]
-df.columns = required_cols
-st.success("✅ Excel muvaffaqiyatli yuklandi")
-st.write("**Ustunlar / Columns:**", df.columns.tolist())
+# -----------------------------
+# SAFE DATE PARSING
+# -----------------------------
+date_cols = ["Date of creation", "Date modified"]
+for col in date_cols:
+    if col in df.columns:
+        series_parsed = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+        if series_parsed.isnull().all():
+            series_parsed = pd.to_datetime(df[col], errors="coerce", infer_datetime_format=True)
+        df[col] = series_parsed
 
-# =============================
-# DATETIME PARSING
-# =============================
-for col in ["Date of creation", "Date modified"]:
-    # Agar string formatida bo'lsa, dd.mm.yyyy hh:mm:ss ni parse qiladi
-    df[col] = pd.to_datetime(df[col].astype(str), dayfirst=True, errors="coerce")
-
-# =============================
-# SIDEBAR FILTERS
-# =============================
-st.sidebar.header("🔎 Filters / Filtrlar")
-stage_f = st.sidebar.multiselect("Stage / Bosqich", df["Stage"].unique(), df["Stage"].unique())
-source_f = st.sidebar.multiselect("Source / Manba", df["Source"].unique(), df["Source"].unique())
-manager_f = st.sidebar.multiselect("Responsible / Mas'ul shaxs", df["Responsible"].unique(), df["Responsible"].unique())
-company_f = st.sidebar.multiselect("Company / Kompaniya", df["Company name"].unique(), df["Company name"].unique())
-
-# =============================
-# DATE RANGE FILTER
-# =============================
-if df["Date of creation"].notna().sum() > 0:
-    min_date = df["Date of creation"].min().date()
-    max_date = df["Date of creation"].max().date()
-    date_range = st.sidebar.date_input("Date of creation / Yaratilgan sana (from - to)", [min_date, max_date])
-
-    df_filtered = df[
-        (df["Stage"].isin(stage_f)) &
-        (df["Source"].isin(source_f)) &
-        (df["Responsible"].isin(manager_f)) &
-        (df["Company name"].isin(company_f)) &
-        (df["Date of creation"].dt.date.between(date_range[0], date_range[1]))
-    ]
+# -----------------------------
+# DATE FILTER
+# -----------------------------
+available_date_cols = [c for c in date_cols if c in df.columns and df[c].notna().any()]
+if available_date_cols:
+    date_col = st.selectbox("Select date column for filtering", available_date_cols)
+    min_date = df[date_col].min().date()
+    max_date = df[date_col].max().date()
+    start_date = st.sidebar.date_input("Start date", min_date, min_value=min_date, max_value=max_date)
+    end_date = st.sidebar.date_input("End date", max_date, min_value=min_date, max_value=max_date)
+    filtered_df = df[(df[date_col] >= pd.to_datetime(start_date)) & (df[date_col] <= pd.to_datetime(end_date))]
 else:
-    st.sidebar.warning("⚠️ Date of creation / Yaratilgan sana ustuni bo‘sh, filter ishlamaydi")
-    df_filtered = df[
-        (df["Stage"].isin(stage_f)) &
-        (df["Source"].isin(source_f)) &
-        (df["Responsible"].isin(manager_f)) &
-        (df["Company name"].isin(company_f))
-    ]
+    filtered_df = df
 
-# =============================
+st.subheader(f"Filtered Data ({len(filtered_df)} records)")
+st.dataframe(filtered_df.head(10))
+
+# -----------------------------
 # KPI METRICS
-# =============================
-st.subheader("📌 KPI Overview / KPI Umumiy ko‘rsatkichlar")
-c1, c2, c3, c4 = st.columns(4)
-c1.metric("Total Leads / Jami yetakchilar", len(df_filtered))
-c2.metric("Companies / Kompaniyalar", df_filtered["Company name"].nunique())
-c3.metric("Managers / Mas'ullar", df_filtered["Responsible"].nunique())
-c4.metric("Sources / Manbalar", df_filtered["Source"].nunique())
+# -----------------------------
+st.subheader("📌 Key Metrics")
+total_campaigns = len(filtered_df)
+total_managers = filtered_df["Responsible"].nunique() if "Responsible" in df.columns else 0
+st.markdown(f"**Total campaigns:** {total_campaigns}  \n**Total managers:** {total_managers}")
 
-# =============================
-# STAGE FUNNEL
-# =============================
-st.subheader("📈 Lead Funnel / Bosqichlar bo‘yicha yetakchilar")
-stage_count = df_filtered["Stage"].value_counts().reset_index()
-stage_count.columns = ["Stage", "Leads"]
-fig_stage = px.bar(stage_count, x="Stage", y="Leads", text="Leads",
-                   title="Leads by Stage / Bosqichlar bo‘yicha yetakchilar")
-st.plotly_chart(fig_stage, use_container_width=True)
+# -----------------------------
+# 1️⃣ Campaigns by Stage (Doughnut)
+# -----------------------------
+if "Stage" in filtered_df.columns:
+    stage_counts = filtered_df["Stage"].value_counts().reset_index()
+    stage_counts.columns = ["Stage", "Count"]
+    fig_stage = px.pie(stage_counts, names="Stage", values="Count", title="Campaigns by Stage", hole=0.4)
+    st.plotly_chart(fig_stage, use_container_width=True)
 
-# =============================
-# BEST SOURCE
-# =============================
-st.subheader("🔥 Best Lead Sources / Eng samarali manbalar")
-src = df_filtered.groupby("Source").size().reset_index(name="Leads")
-fig_src = px.bar(src.sort_values("Leads", ascending=False), x="Source", y="Leads", text="Leads",
-                 title="Leads by Source / Manbalar bo‘yicha yetakchilar")
-st.plotly_chart(fig_src, use_container_width=True)
+# -----------------------------
+# 2️⃣ Campaigns per Manager (Bar)
+# -----------------------------
+if "Responsible" in filtered_df.columns:
+    manager_counts = filtered_df["Responsible"].value_counts().reset_index()
+    manager_counts.columns = ["Manager", "Count"]
+    fig_manager = px.bar(manager_counts, x="Manager", y="Count", title="Campaigns per Manager", text="Count")
+    st.plotly_chart(fig_manager, use_container_width=True)
 
-# =============================
-# MANAGER PERFORMANCE
-# =============================
-st.subheader("🏆 Manager Performance / Mas'ullar ishlashi")
-mgr = df_filtered.groupby(["Responsible", "Stage"]).size().reset_index(name="Count")
-fig_mgr = px.bar(mgr, x="Responsible", y="Count", color="Stage", barmode="stack",
-                 title="Manager Performance by Stage / Mas'ullar bo‘yicha")
-st.plotly_chart(fig_mgr, use_container_width=True)
+# -----------------------------
+# 3️⃣ Companies per Manager (Pie)
+# -----------------------------
+if "Responsible" in filtered_df.columns and "Company name" in filtered_df.columns:
+    company_mgr = filtered_df.groupby("Responsible")["Company name"].nunique().reset_index()
+    company_mgr.columns = ["Manager", "Companies"]
+    fig_comp_mgr = px.pie(company_mgr, names="Manager", values="Companies", title="Number of Companies Managed by Each Manager")
+    st.plotly_chart(fig_comp_mgr, use_container_width=True)
 
-# =============================
-# LEADS OVER TIME
-# =============================
-st.subheader("⏳ Leads Over Time / Yetakchilar vaqti bo‘yicha")
-if df_filtered["Date of creation"].notna().sum() > 0:
-    time_df = df_filtered.resample("D", on="Date of creation").size().reset_index(name="Leads")
-    fig_time = px.line(time_df, x="Date of creation", y="Leads",
-                       title="Daily Lead Creation Trend / Har kunlik yetakchilar soni")
-    st.plotly_chart(fig_time, use_container_width=True)
+# -----------------------------
+# 4️⃣ Timeline of Campaigns (Line)
+# -----------------------------
+if available_date_cols:
+    timeline = filtered_df.groupby(date_col, as_index=False).size()
+    timeline.columns = [date_col, "Campaign Count"]
+    fig_timeline = px.line(timeline, x=date_col, y="Campaign Count", markers=True, title="Campaigns Over Time")
+    st.plotly_chart(fig_timeline, use_container_width=True)
 
-# =============================
-# TOP COMPANIES
-# =============================
-st.subheader("🏢 Top Companies / Eng faol kompaniyalar")
-top_comp = df_filtered["Company name"].value_counts().head(15).reset_index()
-top_comp.columns = ["Company", "Leads"]
-fig_comp = px.bar(top_comp, x="Company", y="Leads", text="Leads",
-                  title="Top Companies by Leads / Kompaniyalar bo‘yicha yetakchilar")
-st.plotly_chart(fig_comp, use_container_width=True)
+# -----------------------------
+# 5️⃣ Manager Stage Analysis (Stacked Bar)
+# -----------------------------
+if "Responsible" in filtered_df.columns and "Stage" in filtered_df.columns:
+    mgr_stage = filtered_df.groupby(["Responsible", "Stage"]).size().reset_index(name="Count")
+    fig_mgr_stage = px.bar(mgr_stage, x="Responsible", y="Count", color="Stage", title="Manager vs Stage Analysis")
+    st.plotly_chart(fig_mgr_stage, use_container_width=True)
 
-# =============================
-# PROCESSING TIME
-# =============================
-st.subheader("⚡ Lead Processing Time / Yetakchi ishlash vaqti (kun)")
-df_filtered["Processing Days"] = (df_filtered["Date modified"] - df_filtered["Date of creation"]).dt.days
-fig_speed = px.histogram(df_filtered, x="Processing Days", nbins=30,
-                         title="Lead Processing Time (Days) / Yetakchi ishlash vaqti")
-st.plotly_chart(fig_speed, use_container_width=True)
+# -----------------------------
+# 6️⃣ Campaigns per Source (Bar)
+# -----------------------------
+if "Source" in filtered_df.columns:
+    src_counts = filtered_df["Source"].value_counts().reset_index()
+    src_counts.columns = ["Source", "Count"]
+    fig_source = px.bar(src_counts, x="Source", y="Count", title="Campaigns by Source", text="Count")
+    st.plotly_chart(fig_source, use_container_width=True)
 
-# =============================
-# RESPONSIBLE ANALYSIS
-# =============================
-st.subheader("👤 Responsible Analysis / Mas'ullar bo‘yicha tahlil")
-resp_count = df_filtered.groupby("Responsible").size().reset_index(name="Leads")
-fig_resp = px.bar(resp_count.sort_values("Leads", ascending=False), x="Responsible", y="Leads", text="Leads",
-                  title="Leads by Responsible / Mas'ullar bo‘yicha yetakchilar")
-st.plotly_chart(fig_resp, use_container_width=True)
+# -----------------------------
+# 7️⃣ Companies Overview (Pie)
+# -----------------------------
+if "Company name" in filtered_df.columns:
+    comp_counts = filtered_df["Company name"].value_counts().reset_index().head(10)
+    comp_counts.columns = ["Company", "Count"]
+    fig_comp = px.pie(comp_counts, names="Company", values="Count", title="Top Companies by Campaigns")
+    st.plotly_chart(fig_comp, use_container_width=True)
 
-# =============================
-# DATA TABLE + DOWNLOAD
-# =============================
-st.subheader("📄 Filtered Data / Tanlangan ma’lumotlar")
-st.dataframe(df_filtered, use_container_width=True)
-
+# -----------------------------
+# 8️⃣ Export Excel
+# -----------------------------
+st.subheader("⬇️ Download Analysis (Excel)")
+output = io.BytesIO()
+with pd.ExcelWriter(output, engine="xlsxwriter") as writer:
+    filtered_df.to_excel(writer, index=False, sheet_name="Filtered_Data")
+output.seek(0)
 st.download_button(
-    "⬇️ Download Filtered Data (CSV) / CSV yuklab olish",
-    df_filtered.to_csv(index=False).encode("utf-8"),
-    file_name="filtered_crm_data.csv",
-    mime="text/csv"
+    label="📥 Download Excel Report",
+    data=output,
+    file_name="crm_campaign_analysis.xlsx",
+    mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 )
+
+st.success("✅ Dashboard ready with multiple interactive charts for managers and campaigns!")
