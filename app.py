@@ -26,40 +26,37 @@ if uploaded_file is None:
 # LOAD EXCEL
 # =============================
 df = pd.read_excel(uploaded_file)
-
 st.success("✅ Excel muvaffaqiyatli yuklandi")
 
 # =============================
-# DATE COLUMNS AUTO PARSE
+# DATE AUTO PARSE
 # =============================
 for col in df.columns:
     if "date" in col.lower():
         df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
 
 # =============================
-# SIDEBAR FILTERS (AUTO)
+# SIDEBAR FILTERS
 # =============================
 st.sidebar.header("🔎 Filterlar")
 
 filtered_df = df.copy()
 
 for col in df.select_dtypes(include=["object"]).columns:
-    values = st.sidebar.multiselect(
-        f"{col}",
-        df[col].dropna().unique(),
-        df[col].dropna().unique()
-    )
-    filtered_df = filtered_df[filtered_df[col].isin(values)]
+    options = filtered_df[col].dropna().unique().tolist()
+    selected = st.sidebar.multiselect(col, options, options)
+    if selected:
+        filtered_df = filtered_df[filtered_df[col].isin(selected)]
 
 # =============================
-# KPI METRICS
+# KPI
 # =============================
 st.subheader("📌 KPI")
 
 c1, c2, c3 = st.columns(3)
 c1.metric("Rows", len(filtered_df))
 c2.metric("Columns", filtered_df.shape[1])
-c3.metric("Unique Values", filtered_df.nunique().sum())
+c3.metric("Total Unique Values", int(filtered_df.nunique().sum()))
 
 # =============================
 # CATEGORICAL ANALYSIS
@@ -69,14 +66,20 @@ st.subheader("📊 Kategoriyalar bo‘yicha analiz")
 cat_cols = filtered_df.select_dtypes(include=["object"]).columns
 
 for col in cat_cols:
-    fig = px.bar(
-        filtered_df[col].value_counts().reset_index(),
-        x="index",
-        y=col,
-        title=f"{col} bo‘yicha taqsimot",
-        text_auto=True
+    vc = (
+        filtered_df[col]
+        .value_counts()
+        .reset_index()
     )
-    fig.update_layout(xaxis_title=col, yaxis_title="Count")
+    vc.columns = [col, "Count"]
+
+    fig = px.bar(
+        vc,
+        x=col,
+        y="Count",
+        title=f"{col} bo‘yicha taqsimot",
+        text="Count"
+    )
     st.plotly_chart(fig, use_container_width=True)
 
 # =============================
@@ -101,7 +104,14 @@ for col in num_cols:
 date_cols = filtered_df.select_dtypes(include=["datetime64[ns]"]).columns
 
 for col in date_cols:
-    time_df = filtered_df.resample("D", on=col).size().reset_index(name="Count")
+    time_df = (
+        filtered_df
+        .dropna(subset=[col])
+        .resample("D", on=col)
+        .size()
+        .reset_index(name="Count")
+    )
+
     fig = px.line(
         time_df,
         x=col,
