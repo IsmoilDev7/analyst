@@ -2,58 +2,56 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
+# =============================
+# PAGE CONFIG
+# =============================
 st.set_page_config(page_title="CRM Analytics Dashboard", layout="wide")
 st.title("📊 CRM Leads Analytics Dashboard")
+
+st.info("⬅️ Chap tomondan Excel fayl yuklang (.xlsx)")
 
 # =============================
 # FILE UPLOADER
 # =============================
-uploaded_file = st.sidebar.file_uploader("📂 Excel fayl yuklang (.xlsx)", type=["xlsx"])
+uploaded_file = st.sidebar.file_uploader("📂 Excel fayl yuklang", type=["xlsx"])
 
 if uploaded_file is None:
-    st.info("⬅️ Analizni boshlash uchun Excel yuklang")
     st.stop()
 
 # =============================
-# LOAD DATA
+# LOAD EXCEL
 # =============================
-df = pd.read_excel(uploaded_file)
+# Avval header bilan o‘qiymiz
+df = pd.read_excel(uploaded_file, header=0)
+
+# Agar barcha ustunlar "Unnamed" bo‘lsa, qo‘lda nom beramiz
+if all("Unnamed" in str(c) for c in df.columns):
+    # Fayl senga ko‘ra faqat 6 ustunli deb faraz qilaymiz
+    df.columns = ["Stage", "Source", "Responsible", "Date of creation", "Date modified", "Company name"]
+
 st.success("✅ Excel muvaffaqiyatli yuklandi")
-
 st.write("**Ustunlar:**", df.columns.tolist())
-
-# =============================
-# COLUMN MAPPING (dynamic)
-# =============================
-def get_col(possible_names):
-    for name in possible_names:
-        if name in df.columns:
-            return name
-    return None
-
-stage_col = get_col(["Stage", "stage", "stage_name"])
-source_col = get_col(["Source", "source", "lead_source"])
-manager_col = get_col(["Responsible", "responsible", "manager"])
-created_col = get_col(["Date of creation", "date of creation", "created_at"])
-modified_col = get_col(["Date modified", "date modified", "modified_at"])
-company_col = get_col(["Company name", "company name", "company"])
-
-# Check required columns
-required_cols = [stage_col, source_col, manager_col, created_col, modified_col, company_col]
-if None in required_cols:
-    st.error("❌ Excel’da kerakli ustunlar topilmadi. Quyidagilar kerak: Stage, Source, Responsible, Date of creation, Date modified, Company name")
-    st.stop()
 
 # =============================
 # DATE PARSE
 # =============================
-df[created_col] = pd.to_datetime(df[created_col], errors="coerce", dayfirst=True)
-df[modified_col] = pd.to_datetime(df[modified_col], errors="coerce", dayfirst=True)
+for col in ["Date of creation", "Date modified"]:
+    if col in df.columns:
+        df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
 
 # =============================
 # SIDEBAR FILTERS
 # =============================
 st.sidebar.header("🔎 Filters")
+
+stage_col = "Stage" if "Stage" in df.columns else df.columns[0]
+source_col = "Source" if "Source" in df.columns else df.columns[1]
+manager_col = "Responsible" if "Responsible" in df.columns else df.columns[2]
+created_col = "Date of creation" if "Date of creation" in df.columns else df.columns[3]
+modified_col = "Date modified" if "Date modified" in df.columns else df.columns[4]
+company_col = "Company name" if "Company name" in df.columns else df.columns[5]
+
+# Filters
 stage_f = st.sidebar.multiselect("Stage", df[stage_col].unique(), df[stage_col].unique())
 source_f = st.sidebar.multiselect("Source", df[source_col].unique(), df[source_col].unique())
 manager_f = st.sidebar.multiselect("Responsible", df[manager_col].unique(), df[manager_col].unique())
