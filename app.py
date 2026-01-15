@@ -28,7 +28,6 @@ if len(df.columns) < len(required_cols):
 elif len(df.columns) > len(required_cols):
     df = df.iloc[:, :len(required_cols)]
 df.columns = required_cols
-
 st.success("✅ Excel muvaffaqiyatli yuklandi")
 st.write("**Ustunlar / Columns:**", df.columns.tolist())
 
@@ -36,8 +35,8 @@ st.write("**Ustunlar / Columns:**", df.columns.tolist())
 # DATETIME PARSING
 # =============================
 for col in ["Date of creation", "Date modified"]:
-    # dd.mm.yyyy hh:mm:ss formatini o'qish
-    df[col] = pd.to_datetime(df[col], format="%d.%m.%Y %H:%M:%S", errors="coerce")
+    # Agar string formatida bo'lsa, dd.mm.yyyy hh:mm:ss ni parse qiladi
+    df[col] = pd.to_datetime(df[col].astype(str), dayfirst=True, errors="coerce")
 
 # =============================
 # SIDEBAR FILTERS
@@ -46,6 +45,7 @@ st.sidebar.header("🔎 Filters / Filtrlar")
 stage_f = st.sidebar.multiselect("Stage / Bosqich", df["Stage"].unique(), df["Stage"].unique())
 source_f = st.sidebar.multiselect("Source / Manba", df["Source"].unique(), df["Source"].unique())
 manager_f = st.sidebar.multiselect("Responsible / Mas'ul shaxs", df["Responsible"].unique(), df["Responsible"].unique())
+company_f = st.sidebar.multiselect("Company / Kompaniya", df["Company name"].unique(), df["Company name"].unique())
 
 # =============================
 # DATE RANGE FILTER
@@ -59,6 +59,7 @@ if df["Date of creation"].notna().sum() > 0:
         (df["Stage"].isin(stage_f)) &
         (df["Source"].isin(source_f)) &
         (df["Responsible"].isin(manager_f)) &
+        (df["Company name"].isin(company_f)) &
         (df["Date of creation"].dt.date.between(date_range[0], date_range[1]))
     ]
 else:
@@ -66,7 +67,8 @@ else:
     df_filtered = df[
         (df["Stage"].isin(stage_f)) &
         (df["Source"].isin(source_f)) &
-        (df["Responsible"].isin(manager_f))
+        (df["Responsible"].isin(manager_f)) &
+        (df["Company name"].isin(company_f))
     ]
 
 # =============================
@@ -135,6 +137,15 @@ df_filtered["Processing Days"] = (df_filtered["Date modified"] - df_filtered["Da
 fig_speed = px.histogram(df_filtered, x="Processing Days", nbins=30,
                          title="Lead Processing Time (Days) / Yetakchi ishlash vaqti")
 st.plotly_chart(fig_speed, use_container_width=True)
+
+# =============================
+# RESPONSIBLE ANALYSIS
+# =============================
+st.subheader("👤 Responsible Analysis / Mas'ullar bo‘yicha tahlil")
+resp_count = df_filtered.groupby("Responsible").size().reset_index(name="Leads")
+fig_resp = px.bar(resp_count.sort_values("Leads", ascending=False), x="Responsible", y="Leads", text="Leads",
+                  title="Leads by Responsible / Mas'ullar bo‘yicha yetakchilar")
+st.plotly_chart(fig_resp, use_container_width=True)
 
 # =============================
 # DATA TABLE + DOWNLOAD
