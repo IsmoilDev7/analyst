@@ -2,12 +2,8 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-# =============================
-# PAGE CONFIG
-# =============================
 st.set_page_config(page_title="CRM Dashboard / CRM Boshqaruv Paneli", layout="wide")
 st.title("📊 CRM Leads Analytics Dashboard / CRM Yetakchilar Tahlili")
-
 st.info("⬅️ Chap tomondan Excel fayl yuklang (.xlsx)")
 
 # =============================
@@ -26,29 +22,27 @@ df = pd.read_excel(uploaded_file, header=0)
 # AUTOMATIC COLUMN RENAMING
 # =============================
 required_cols = ["Stage", "Source", "Responsible", "Date of creation", "Date modified", "Company name"]
-
-# Kam/Ko‘p bo‘lsa tuzatish
 if len(df.columns) < len(required_cols):
     for i in range(len(required_cols) - len(df.columns)):
         df[f"extra_{i}"] = ""
 elif len(df.columns) > len(required_cols):
     df = df.iloc[:, :len(required_cols)]
-
 df.columns = required_cols
-st.success("✅ Excel muvaffaqiyatli yuklandi / Excel fayl muvaffaqiyatli yuklandi")
+
+st.success("✅ Excel muvaffaqiyatli yuklandi")
 st.write("**Ustunlar / Columns:**", df.columns.tolist())
 
 # =============================
-# DATE PARSE
+# DATETIME PARSING
 # =============================
 for col in ["Date of creation", "Date modified"]:
-    df[col] = pd.to_datetime(df[col], errors="coerce", dayfirst=True)
+    # dd.mm.yyyy hh:mm:ss formatini o'qish
+    df[col] = pd.to_datetime(df[col], format="%d.%m.%Y %H:%M:%S", errors="coerce")
 
 # =============================
 # SIDEBAR FILTERS
 # =============================
 st.sidebar.header("🔎 Filters / Filtrlar")
-
 stage_f = st.sidebar.multiselect("Stage / Bosqich", df["Stage"].unique(), df["Stage"].unique())
 source_f = st.sidebar.multiselect("Source / Manba", df["Source"].unique(), df["Source"].unique())
 manager_f = st.sidebar.multiselect("Responsible / Mas'ul shaxs", df["Responsible"].unique(), df["Responsible"].unique())
@@ -57,16 +51,15 @@ manager_f = st.sidebar.multiselect("Responsible / Mas'ul shaxs", df["Responsible
 # DATE RANGE FILTER
 # =============================
 if df["Date of creation"].notna().sum() > 0:
-    min_date = df["Date of creation"].min()
-    max_date = df["Date of creation"].max()
+    min_date = df["Date of creation"].min().date()
+    max_date = df["Date of creation"].max().date()
     date_range = st.sidebar.date_input("Date of creation / Yaratilgan sana (from - to)", [min_date, max_date])
 
-    # Filter by date range
     df_filtered = df[
         (df["Stage"].isin(stage_f)) &
         (df["Source"].isin(source_f)) &
         (df["Responsible"].isin(manager_f)) &
-        (df["Date of creation"].between(pd.to_datetime(date_range[0]), pd.to_datetime(date_range[1])))
+        (df["Date of creation"].dt.date.between(date_range[0], date_range[1]))
     ]
 else:
     st.sidebar.warning("⚠️ Date of creation / Yaratilgan sana ustuni bo‘sh, filter ishlamaydi")
